@@ -309,8 +309,8 @@ class GameSim:
         b.hit = True
 
         # Compute approach angle similar to Game.checkCollision
-        dx = (b.x - b.ox) if b.ox or b.oy else b.xvel
-        dy = (GROUND_Y - b.y) if b.ox or b.oy else b.yvel
+        dx = (b.x - b.ox) if (b.ox is not None and b.oy is not None) else b.xvel
+        dy = (GROUND_Y - b.y) if (b.ox is not None and b.oy is not None) else b.yvel
         approach_rad = math.atan2(dy, dx)
         approach_deg = approach_rad * 180.0 / math.pi
         thresh = 70.0
