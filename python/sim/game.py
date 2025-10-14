@@ -71,8 +71,15 @@ class GameSim:
     def reset(self):
         self.__dict__.update(GameSim().__dict__)  # reset to defaults
 
+
+    jumping: bool = False
+    hamster_y: float = 956.0
+    hamster_yvel: float = 0.0
+    jump_boost: bool = False
+
+
     # --- Launch API ---
-    def shoot(self, force_like: float, angle_rad: float, start_pos: Tuple[float, float] = (148.0, 956.0)):
+    def shoot(self, force_like: float, angle_rad: float, start_pos: Optional[Tuple[float, float]] = None):
         """
         Mirrors Game.shoot() semantics simplifying UI-dependent pieces.
 
@@ -81,6 +88,8 @@ class GameSim:
         computed 90 - f in Game.shoot) for simplicity, and `angle_rad` as the
         launch angle in radians.
         """
+        if start_pos is None:
+            start_pos = (148.0, self.hamster_y)
         self.faceplant = False
         self.done = False
         self.blt_num += 1
@@ -88,6 +97,83 @@ class GameSim:
         self.bullet = Bullet(x=x, y=y, vel=force_like, ang_rad=angle_rad, grav=DEFAULT_GRAVITY)
         self.grav_points = self.grav_points_max
         self.time = 0.0
+    def jump(self):
+        """Start the jump phase (AS: Game.jump)"""
+        self.jumping = True
+        self.hamster_y = 956.0
+        self.hamster_yvel = float(-(random.randint(10, 14)))
+        self.jump_boost = False
+
+
+    def step_jump(self, dt: float = DT) -> Tuple[float, float]:
+        """
+        Update jump physics (AS: Game.jumpFrame).
+        Returns (hamster_y, launch_meter_position_0_to_100)
+        """
+        if not self.jumping:
+            return self.hamster_y, 50.0
+
+        # Boost once when passing y < 930
+        if not self.jump_boost and self.hamster_y < 930:
+            boost = float(-(random.randint(15, 19)))
+            self.hamster_yvel += boost
+            self.jump_boost = True
+
+        # Gravity (AS uses 1.5 when rising, 0.75 when falling)
+        grav = 1.5 if self.hamster_yvel < 0 else 0.75
+        self.hamster_yvel += grav * (dt / DT)
+        self.hamster_y += self.hamster_yvel * (dt / DT)
+
+        # Launch meter position (AS line ~1349)
+        meter_pos = 48 + 0.35417 * (self.hamster_y - 715)
+        meter_pos = max(10.0, min(100.0, meter_pos))
+
+        # Hit ground = faceplant/zero distance
+        if self.hamster_y >= 956:
+            self.hamster_y = 956
+            self.jumping = False
+            self.faceplant = True
+            self.done = True
+
+        return self.hamster_y, meter_pos
+
+
+    def launch(self) -> bool:
+        """
+        Attempt to launch from current jump position (AS: Game.launch + getPillowCollision).
+        Returns True if hit pillow, False if miss.
+        """
+        if not self.jumping:
+            return False
+
+        pillow_x, pillow_y = 140.0, 759.0  # AS: pillow collision zone
+        
+        # Check collision (AS uses hitTest on core)
+        if abs(148.0 - pillow_x) < 30 and abs(self.hamster_y - pillow_y) < 30:
+            # Hit! Calculate angle and force
+            dx = 148.0 - pillow_x + 30
+            dy = self.hamster_y - pillow_y - 5
+            angle_rad = math.atan2(dy, dx)
+            angle_deg = angle_rad * 180.0 / math.pi + 90
+            angle_rad = angle_deg * math.pi / 180.0
+            
+            force = 90 - math.sqrt(dx*dx + dy*dy)
+            if self.hamster_yvel < 0:  # Adjust for upward velocity
+                if angle_deg <= 90:
+                    force -= self.hamster_yvel / 2
+                else:
+                    force += self.hamster_yvel / 2
+            
+            self.jumping = False
+            self.shoot(force_like=force, angle_rad=angle_rad)
+            return True
+        else:
+            # Miss
+            self.jumping = False
+            self.faceplant = True
+            self.done = True
+            return False
+
 
     # --- Step loop ---
     def step(self, action: Optional[Union[Dict[str, float], Tuple[int], int]] = None, dt: float = DT) -> Tuple[Tuple[float, float, float, float], float, bool, Dict]:
@@ -105,6 +191,16 @@ class GameSim:
         """
         if self.done:
             return self._observe(), 0.0, True, {}
+
+        # Jump phase
+        if self.jumping:
+            hamster_y, meter = self.step_jump(dt)
+            launch_pressed = self._parse_action(action)
+            if launch_pressed:
+                self.launch()
+            # Observation during jump: hamster position, no bullet yet
+            obs = (148.0, hamster_y, 0.0, self.hamster_yvel)
+            return obs, 0.0, self.done, {"jumping": True, "meter": meter}
 
         assert self.bullet is not None, "Call shoot() before step()"
 

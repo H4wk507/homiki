@@ -25,13 +25,12 @@ def main():
     clock = pygame.time.Clock()
 
     sim = GameSim()
-    angle_deg = 45.0
-    speed = 60.0
     launched = False
     glide_hold = False
+    launch_pressed_this_frame = False  # Add this flag
+
 
     cam_x = 0.0
-    # Keep ground near bottom of the screen (margin ~ 50 px)
     cam_y = GROUND_Y - (HEIGHT - 50)
 
     font = pygame.font.SysFont(None, 20)
@@ -39,15 +38,21 @@ def main():
     running = True
     while running:
         dt = clock.tick(FPS) / 1000.0
+        launch_pressed_this_frame = False  # Reset each frame
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                if event.key == pygame.K_RETURN and not launched:
-                    sim.shoot(force_like=speed, angle_rad=math.radians(angle_deg))
-                    launched = True
+                # Change: ENTER starts jump OR attempts launch
+                if event.key == pygame.K_RETURN:
+                    if not launched and not sim.jumping:
+                        sim.jump()  # Start the jump phase
+                        launched = True
+                    elif sim.jumping:
+                        launch_pressed_this_frame = True
+                    # Launch press is handled in step() below
                 if event.key == pygame.K_SPACE:
                     glide_hold = True
             elif event.type == pygame.KEYUP:
@@ -58,28 +63,22 @@ def main():
             elif event.type == pygame.MOUSEBUTTONUP:
                 glide_hold = False
 
-        # Continuous controls for angle and speed before launch
+        # Remove manual angle/speed controls
         keys = pygame.key.get_pressed()
-        if not launched:
-            if keys[pygame.K_LEFT]:
-                angle_deg = max(5.0, angle_deg - 60.0 * dt)
-            if keys[pygame.K_RIGHT]:
-                angle_deg = min(85.0, angle_deg + 60.0 * dt)
-            if keys[pygame.K_UP]:
-                speed = min(120.0, speed + 60.0 * dt)
-            if keys[pygame.K_DOWN]:
-                speed = max(10.0, speed - 60.0 * dt)
+        # if not launched:
+        #     if keys[pygame.K_LEFT]: ...
 
-        # Step simulation
+        # Step simulation - handles both jump and flight phases
         if launched and not sim.done:
-            obs, r, done, info = sim.step(1 if glide_hold else 0, dt=min(dt, 0.05))
-            # camera follows x; keep y so ground is visible
+            # During jump: ENTER attempts launch
+            # During flight: glide_hold activates glide
+            action = 1 if (sim.jumping and launch_pressed_this_frame) or (not sim.jumping and glide_hold) else 0
+            obs, r, done, info = sim.step(action, dt=min(dt, 0.05))
+            
             x, y, xvel, yvel = obs
             cam_x = max(0.0, x - WIDTH * 0.3)
-            # keep cam_y fixed to show ground
             cam_y = min(y - HEIGHT / 2, GROUND_Y - (HEIGHT - 50))
         elif sim.done:
-            # allow restart with Enter
             if keys[pygame.K_RETURN]:
                 sim.reset()
                 launched = False
@@ -98,23 +97,19 @@ def main():
         sx, sy = world_to_screen(start_x, start_y, cam_x, cam_y)
         pygame.draw.circle(screen, (120, 120, 120), (sx, sy), 4)
 
+        # Remove manual aim line
+        # if not launched: ...
 
-        # Aim line while not launched
-        if not launched:
-            # draw a line showing the current aim direction
-            length = 80
-            ang_rad = math.radians(angle_deg)
-            # Bullet uses sin for x, -cos for y
-            ax = sx + int(math.sin(ang_rad) * length)
-            ay = sy + int(-math.cos(ang_rad) * length)
-            pygame.draw.line(screen, (80, 80, 200), (sx, sy), (ax, ay), 2)
-
-        # Bullet
-        if sim.bullet is not None:
+        # Draw jumping hamster OR bullet
+        if sim.jumping:
+            # Show hamster during jump phase
+            hx, hy = world_to_screen(148, sim.hamster_y, cam_x, cam_y)
+            pygame.draw.circle(screen, (150, 100, 50), (hx, hy), 8)
+        elif sim.bullet is not None:
             bx, by = world_to_screen(sim.bullet.x, sim.bullet.y, cam_x, cam_y)
             pygame.draw.circle(screen, (200, 50, 50), (bx, by), 6)
 
-        # Powerups
+        # Powerups (unchanged)
         if getattr(sim, "powerups", None):
             for p in sim.powerups:
                 px, py = world_to_screen(p["x"], p["y"], cam_x, cam_y)
@@ -133,41 +128,43 @@ def main():
                     color = (255, 220, 80)
                 pygame.draw.circle(screen, color, (px, py), 8)
 
-        # HUD
+        # HUD - update to show jump state
         hud_lines = [
-            f"Angle: {angle_deg:.1f} deg",
-            f"Speed: {speed:.1f}",
+            f"Jumping: {sim.jumping}",
             f"Launched: {launched}",
             f"Glide button: {glide_hold}",
             f"Glide locked: {getattr(sim, 'glide_locked', False)}",
             f"Grav points: {getattr(sim, 'grav_points', 0)}/{getattr(sim, 'grav_points_max', 0)}",
-            f"Distance ~ { (sim.bullet.x/100.0) if sim.bullet else 0.0:.1f} ft",
-            "Controls: LEFT/RIGHT angle, UP/DOWN speed, ENTER launch, SPACE glide",
+            f"Distance ~ {(sim.bullet.x/100.0) if sim.bullet else 0.0:.1f} ft",
+            "Controls: ENTER to jump/launch, SPACE for glide during flight",
         ]
         for i, line in enumerate(hud_lines):
             img = font.render(line, True, (20, 20, 20))
             screen.blit(img, (10, 10 + i * 18))
 
-        # Show nearest powerup type
+        # Show meter during jump
+        if sim.jumping:
+            meter_txt = f"Launch Meter: {info.get('meter', 0):.1f}%"
+            img = font.render(meter_txt, True, (20, 20, 20))
+            screen.blit(img, (10, 10 + len(hud_lines) * 18))
+
+        # Powerups info (unchanged)
         if getattr(sim, "powerups", None):
             if sim.powerups:
-                # find first ahead of bullet/cam
                 info_txt = f"Powerups: {', '.join(p['typ'] for p in sim.powerups[:4])}"
             else:
                 info_txt = "Powerups: none"
             img = font.render(info_txt, True, (20, 20, 20))
-            screen.blit(img, (10, 10 + (len(hud_lines) + 1) * 18))
+            screen.blit(img, (10, 10 + (len(hud_lines) + 2) * 18))
 
-        # Gravity meter bar (top-right)
+        # Gravity meter bar (unchanged)
         if sim is not None:
             max_w = 200
             h = 12
             pad = 10
             x0 = WIDTH - max_w - pad
             y0 = pad
-            # background
             pygame.draw.rect(screen, (200, 200, 200), pygame.Rect(x0, y0, max_w, h), border_radius=3)
-            # fill
             frac = (sim.grav_points / sim.grav_points_max) if sim.grav_points_max > 0 else 0
             w = int(max(0, min(1, frac)) * max_w)
             color = (80, 180, 80) if w > max_w * 0.3 else (200, 80, 80)
@@ -179,7 +176,6 @@ def main():
 
     pygame.quit()
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
