@@ -14,7 +14,7 @@ def evaluate(model_path: str, num_episodes: int = 10, temperature: float = 0.5):
     temperature: 0.0 = fully deterministic, 1.0 = full stochasticity
     0.3-0.5 usually works well for more robust evaluation
     """
-    config = PPOConfig(state_dim=10)
+    config = PPOConfig(state_dim=11)
     agent = PPOAgent(config)
     agent.load(model_path)
     

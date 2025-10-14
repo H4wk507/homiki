@@ -197,10 +197,15 @@ class GameSim:
             hamster_y, meter = self.step_jump(dt)
             launch_pressed = self._parse_action(action)
             if launch_pressed:
-                self.launch()
+                success = self.launch()  # Returns True/False
             # Observation during jump: hamster position, no bullet yet
             obs = (148.0, hamster_y, 0.0, self.hamster_yvel)
-            return obs, 0.0, self.done, {"jumping": True, "meter": meter}
+            return obs, 0.0, self.done, {
+                "jumping": True, 
+                "meter": meter,
+                "hamster_yvel": self.hamster_yvel,
+                "launch_success": success if launch_pressed else None,
+            }
 
         assert self.bullet is not None, "Call shoot() before step()"
 

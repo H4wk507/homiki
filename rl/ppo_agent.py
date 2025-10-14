@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 @dataclass
 class PPOConfig:
-    state_dim: int = 10
+    state_dim: int = 11
     action_dim: int = 2  # [glide_button, launch_button]
     hidden_dim: int = 256
     lr: float = 5e-4
