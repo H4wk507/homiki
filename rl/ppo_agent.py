@@ -8,18 +8,18 @@ from dataclasses import dataclass
 
 @dataclass
 class PPOConfig:
-    state_dim: int = 11
+    state_dim: int = 19
     action_dim: int = 2  # [glide_button, launch_button]
-    hidden_dim: int = 256
-    lr: float = 5e-4
-    gamma: float = 0.99
-    gae_lambda: float = 0.95
-    clip_epsilon: float = 0.2
-    entropy_coef: float = 0.05
+    hidden_dim: int = 512
+    lr: float = 1e-4
+    gamma: float = 0.995
+    gae_lambda: float = 0.97
+    clip_epsilon: float = 0.15
+    entropy_coef: float = 0.1
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
-    ppo_epochs: int = 4
-    batch_size: int = 64
+    ppo_epochs: int = 6
+    batch_size: int = 128
 
 
 class ActorCritic(nn.Module):
@@ -35,12 +35,19 @@ class ActorCritic(nn.Module):
             nn.ReLU(),
         )
         
-        # Policy head (actor)
-        self.policy = nn.Sequential(
+        # Separate policy heads: one for jump, one for flight
+        self.policy_jump = nn.Sequential(
             nn.Linear(config.hidden_dim, config.hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(config.hidden_dim // 2, config.action_dim),
         )
+
+        self.policy_flight = nn.Sequential(
+            nn.Linear(config.hidden_dim, config.hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim // 2, config.action_dim),
+        )
+    
         
         # Value head (critic)
         self.value = nn.Sequential(
@@ -50,8 +57,18 @@ class ActorCritic(nn.Module):
         )
         
     def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # state[:,8] is the "jumping" flag (from extract_state)
         features = self.features(state)
-        logits = self.policy(features)
+        if state.size(1) > 8:
+            jump_mask = state[:, 8].unsqueeze(1)  # shape (batch,1)
+        else:
+            jump_mask = torch.zeros((state.size(0), 1), device=state.device)
+
+        logits_jump = self.policy_jump(features)
+        logits_flight = self.policy_flight(features)
+
+        # Blend logits based on whether we're in jump or flight phase
+        logits = jump_mask * logits_jump + (1 - jump_mask) * logits_flight
         value = self.value(features)
         return logits, value
     

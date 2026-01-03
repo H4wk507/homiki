@@ -14,7 +14,7 @@ def evaluate(model_path: str, num_episodes: int = 10, temperature: float = 0.5):
     temperature: 0.0 = fully deterministic, 1.0 = full stochasticity
     0.3-0.5 usually works well for more robust evaluation
     """
-    config = PPOConfig(state_dim=11)
+    config = PPOConfig(state_dim=19)
     agent = PPOAgent(config)
     agent.load(model_path)
     
@@ -38,9 +38,12 @@ def evaluate(model_path: str, num_episodes: int = 10, temperature: float = 0.5):
             with torch.no_grad():
                 logits, _ = agent.actor_critic(state_tensor)
                 # Apply temperature
-                probs = torch.softmax(logits / temperature, dim=-1)
-                dist = torch.distributions.Categorical(probs)
-                action = dist.sample().item()
+                if temperature == 0.0:
+                    action = logits.argmax(dim=-1).item()
+                else:
+                    probs = torch.softmax(logits / temperature, dim=-1)
+                    dist = torch.distributions.Categorical(probs)
+                    action = dist.sample().item()
             
             obs, reward, done, info = sim.step(action)
             
@@ -69,4 +72,4 @@ if __name__ == '__main__':
         sys.exit(1)
     
     temp = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
-    evaluate(sys.argv[1], num_episodes=20, temperature=temp)
+    evaluate(sys.argv[1], num_episodes=100, temperature=temp)
