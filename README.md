@@ -1,3 +1,13 @@
+## Idea
+
+The idea of the project is to train an RL agent to solve the flash game "Flight of the Hamsters".
+The game is decompiled using JPEXS decompiler and the physics is rewritten
+to python using Claude, in order to have a training environment for the RL agent.
+Initial runs are not so good, because of small number of epochs, compute power
+and small knowledge about RL in general.
+
+To be continued.
+
 ## TODO:
 
 - [X] Decompile physics
